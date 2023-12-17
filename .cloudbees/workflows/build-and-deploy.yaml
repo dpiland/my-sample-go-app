@@ -133,7 +133,6 @@ jobs:
                 tag: ${{ steps.build.outputs.tag-digest }}          
       - uses: drew-jenkins-action1
         name: demo-jenkins
-        kind: build
   build-prod:
     if: ${{ vars.CLUSTER_ENVIRONMENT == 'prod' }}
     steps:
