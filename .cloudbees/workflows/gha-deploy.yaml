@@ -181,7 +181,7 @@ jobs:
           format: MARKDOWN
     needs:
       - deploy_prod
-  Build-GHA:
+  Build-Test:
     environment: Test-environment
     steps:
       - uses: cloudbees-io/ghactions-run-workflow@v2
@@ -202,4 +202,5 @@ jobs:
         with:
           provider: test
           github-server-url: test.com
-    needs: Build-GHA
+    needs:
+      - Build-Test
