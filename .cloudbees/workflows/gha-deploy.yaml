@@ -1,0 +1,215 @@
+apiVersion: automation.cloudbees.io/v1alpha1
+kind: workflow
+name: GHA-deploy
+on:
+  push:
+    branches:
+      - "**"
+env:
+  APP_NAME: spring-petclinic
+  NAMESPACE: dpiland
+jobs:
+  container-scan:
+    steps:
+      - uses: cloudbees-io/snyk-scan-container@v1
+        name: Scan with Snyk Container
+        kind: scan
+        with:
+          orgname: ${{ secrets.SNYK_ORGNAME }}
+          token: ${{ secrets.SNYK_TOKEN }}
+          image-location: ${{ secrets.DOCKERHUB_STAGE_USERNAME }}/spring-petclinic
+          image-tag: ${{ cloudbees.scm.sha }}
+    needs:
+      - Build-GHA
+  exit_gate:
+    environment: ldonley_dev
+    steps:
+      - uses: cloudbees-io/publish-evidence-item@v1
+        name: Publish Results
+        with:
+          content: |-
+            ## Exit Gates Results
+            ${{vars.PETCLINIC_DEV_EXIT_GATE}} 
+          format: MARKDOWN
+      - uses: docker://maven:3-eclipse-temurin-17
+        name: Manual Approval
+        run: |
+          echo "Manual approval required before proceeding to deployment."
+    needs:
+      - deploy_dev
+  smokeTest_dev:
+    steps:
+      - uses: cloudbees-io/checkout@v1
+        name: Checkout
+      - uses: docker://maven:3-eclipse-temurin-17
+        name: Smoke Test
+        run: |
+          mvn test
+      - name: Publish Results
+        uses: cloudbees-io/publish-evidence-item@v1
+        with:
+          content: "${{vars.PETCLINIC_SMOKETEST_DEV_RESULTS}} "
+          format: MARKDOWN
+    needs:
+      - deploy_dev
+  deploy_dev:
+    environment: ldonley_dev
+    steps:
+      - uses: cloudbees-io/checkout@v1
+        name: Checkout
+      - uses: cashokannamalai/kubeconfig@v1
+        name: Set kubeconfig
+        with:
+          secname: ${{ secrets.kubeconfig }}
+      - uses: cloudbees-io/helm-install@v1
+        name: Install helm chart
+        id: install-chart
+        with:
+          chart-location: ${{ cloudbees.workspace }}/chart
+          release-name: ${{ env.APP_NAME }}
+          namespace: ${{ env.NAMESPACE }}-dev
+          values: |
+            image:
+              repository: ${{ secrets.DOCKERHUB_STAGE_USERNAME }}/spring-petclinic
+              tag: ${{ cloudbees.scm.sha }}
+            fmKey: ${{ secrets.FM_TOKEN }}
+            hostname: ${{ env.NAMESPACE }}-petclinic-dev.preview.cb-demos.io
+      - uses: cloudbees-io/publish-evidence-item@v1
+        name: Publish evidence
+        with:
+          content: |-
+            ## Deployed environment
+            [Dev frontend](https://${{ env.NAMESPACE }}-petclinic-dev.preview.cb-demos.io/)
+
+            Running spring-petclinic:${{ cloudbees.scm.sha }}
+          format: MARKDOWN
+    needs:
+      - container-scan
+      - Binary_Upload
+  deploy_qa:
+    environment: ldonley_qa
+    steps:
+      - name: Checkout
+        uses: cloudbees-io/checkout@v1
+      - uses: cashokannamalai/kubeconfig@v1
+        name: Set kubeconfig
+        with:
+          secname: ${{ secrets.kubeconfig }}
+      - id: install-chart
+        name: Install helm chart
+        uses: cloudbees-io/helm-install@v1
+        with:
+          chart-location: ${{ cloudbees.workspace }}/chart
+          release-name: ${{ env.APP_NAME }}
+          namespace: ${{ env.NAMESPACE }}-qa
+          values: |
+            image:
+              repository: ${{ secrets.DOCKERHUB_STAGE_USERNAME }}/spring-petclinic
+              tag: ${{ cloudbees.scm.sha }}
+            fmKey: ${{ secrets.FM_TOKEN }}
+            hostname: ${{ env.NAMESPACE }}-petclinic-qa.preview.cb-demos.io
+      - name: Publish evidence
+        uses: cloudbees-io/publish-evidence-item@v1
+        with:
+          content: |-
+            ## Deployed environment
+            [QA frontend](https://${{ env.NAMESPACE }}-petclinic-qa.preview.cb-demos.io/)
+
+            Running spring-petclinic:${{ cloudbees.scm.sha }}
+          format: MARKDOWN
+    needs:
+      - exit_gate
+  smokeTest_qa:
+    steps:
+      - uses: cloudbees-io/checkout@v1
+        name: Checkout
+      - uses: docker://maven:3-eclipse-temurin-17
+        name: Smoke Test
+        run: |
+          mvn test
+      - name: Publish Results
+        uses: cloudbees-io/publish-evidence-item@v1
+        with:
+          content: "${{vars.PETCLINIC_SMOKETEST_QA_RESULTS}} "
+          format: MARKDOWN
+    needs:
+      - deploy_qa
+  deploy_prod:
+    environment: ldonley_prod
+    steps:
+      - name: Checkout
+        uses: cloudbees-io/checkout@v1
+      - uses: cashokannamalai/kubeconfig@v1
+        name: Set kubeconfig
+        with:
+          secname: ${{ secrets.kubeconfig }}
+      - id: install-chart
+        name: Install helm chart
+        uses: cloudbees-io/helm-install@v1
+        with:
+          chart-location: ${{ cloudbees.workspace }}/chart
+          release-name: ${{ env.APP_NAME }}
+          namespace: ${{ env.NAMESPACE }}-prod
+          values: |
+            image:
+              repository: ${{ secrets.DOCKERHUB_STAGE_USERNAME }}/spring-petclinic
+              tag: ${{ cloudbees.scm.sha }}
+            fmKey: ${{ secrets.FM_TOKEN }}
+            hostname: ${{ env.NAMESPACE }}-petclinic-prod.preview.cb-demos.io
+      - name: Publish evidence
+        uses: cloudbees-io/publish-evidence-item@v1
+        with:
+          content: |-
+            ## Deployed environment
+            [Production frontend](https://${{ env.NAMESPACE }}-petclinic-prod.preview.cb-demos.io/)
+
+            Running spring-petclinic:${{ cloudbees.scm.sha }}
+          format: MARKDOWN
+    needs:
+      - deploy_qa
+  smokeTest_prod:
+    steps:
+      - uses: cloudbees-io/checkout@v1
+        name: Checkout
+      - uses: docker://maven:3-eclipse-temurin-17
+        name: Smoke Test
+        run: |
+          mvn test
+      - name: Publish Results
+        uses: cloudbees-io/publish-evidence-item@v1
+        with:
+          content: "${{vars.PETCLINIC_SMOKETEST_PROD_RESULTS}} "
+          format: MARKDOWN
+    needs:
+      - deploy_prod
+  Build-GHA:
+    environment: Test-environment
+    steps:
+      - uses: cloudbees-io/ghactions-run-workflow@v2
+        name: Checkout GHA
+        kind: build
+        with:
+          token: test
+          org-name: piland_island
+          repo-name: dpiland
+          branch-name: main
+          workflow-name: demo
+      - uses: cloudbees-io/ghactions-run-workflow@v2
+        name: Test GHA
+        kind: test
+        with:
+          token: /
+          org-name: pilandisland
+          repo-name: test
+          branch-name: main
+          workflow-name: demo
+  Binary_Upload:
+    environment: Test-environment
+    steps:
+      - uses: cloudbees-io/configure-git-global-credentials@v1
+        name: Upload
+        kind: build
+        with:
+          provider: test
+          github-server-url: test.com
+    needs: Build-GHA
