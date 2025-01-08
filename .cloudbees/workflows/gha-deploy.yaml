@@ -20,7 +20,7 @@ jobs:
           image-location: ${{ secrets.DOCKERHUB_STAGE_USERNAME }}/spring-petclinic
           image-tag: ${{ cloudbees.scm.sha }}
     needs:
-      - Build-GHA
+      - Binary_Upload
   exit_gate:
     environment: ldonley_dev
     steps:
@@ -85,7 +85,6 @@ jobs:
           format: MARKDOWN
     needs:
       - container-scan
-      - Binary_Upload
   deploy_qa:
     environment: ldonley_qa
     steps:
@@ -186,7 +185,7 @@ jobs:
     environment: Test-environment
     steps:
       - uses: cloudbees-io/ghactions-run-workflow@v2
-        name: Checkout GHA
+        name: Run GHA
         kind: build
         with:
           token: test
@@ -194,20 +193,11 @@ jobs:
           repo-name: dpiland
           branch-name: main
           workflow-name: demo
-      - uses: cloudbees-io/ghactions-run-workflow@v2
-        name: Test GHA
-        kind: test
-        with:
-          token: /
-          org-name: pilandisland
-          repo-name: test
-          branch-name: main
-          workflow-name: demo
   Binary_Upload:
     environment: Test-environment
     steps:
       - uses: cloudbees-io/configure-git-global-credentials@v1
-        name: Upload
+        name: Register artifact
         kind: build
         with:
           provider: test
