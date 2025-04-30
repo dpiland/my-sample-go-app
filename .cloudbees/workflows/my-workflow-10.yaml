@@ -1,0 +1,158 @@
+apiVersion: automation.cloudbees.io/v1alpha1
+kind: workflow
+name: My workflow
+on:
+  workflow_dispatch:
+    inputs:
+      manifest:
+        type: string
+        required: true
+        description: A sample manifest should go here, to help user
+metadata:
+  stages/v1alpha1:
+    - name: Build
+      jobs:
+        - build
+    - name: Test
+      jobs:
+        - job
+        - Code_quality
+        - SAST
+        - Secrets_Detection
+        - Manual_approval
+    - name: PreProd-Deploy
+      jobs:
+        - ArgoCD
+    - name: Scans
+      jobs:
+        - DAST
+        - ManualApproval
+    - name: Prod_Deploy
+      jobs:
+        - ArgoCD_Deploy
+jobs:
+  build:
+    needs: []
+    environment: ""
+    outputs: {}
+    steps:
+      - run: |
+          echo "hello world"
+        uses: docker://golang:1.20.3-alpine3.17
+        name: Say hello
+        shell: sh
+      - name: EKS credentials
+        uses: cloudbees-io/configure-eks-credentials@v1
+        kind: build
+        with:
+          action-name: test
+  job:
+    needs:
+      - Secrets_Detection
+    environment: ""
+    outputs: {}
+    steps:
+      - name: newrelic
+        uses: docker://golang:1.20.3-alpine3.17
+        shell: sh
+        run: echo "hello world"
+        kind: test
+  Code_quality:
+    needs:
+      - job
+    environment: QA
+    outputs: {}
+    steps:
+      - name: QA
+        kind: test
+        uses: cloudbees-io/publish-test-results@v1
+        with:
+          test-type: test
+  SAST:
+    needs:
+      - Secrets_Detection
+    environment: ""
+    outputs: {}
+    steps:
+      - name: CheckMarx SAST
+        kind: test
+        uses: cloudbees-io/checkmarx-sast-scan-code@v1
+        with:
+          server-url: test.com
+          username: test
+          password: test!
+          token: secret
+  Secrets_Detection:
+    needs:
+      - build
+    environment: ""
+    outputs: {}
+    steps:
+      - name: Trufflehog secrets scan
+        kind: test
+        uses: cloudbees-io/trufflehog-secret-scan-code@v1
+        with:
+          branch: main
+  ArgoCD:
+    needs:
+      - Manual_approval
+    environment: ""
+    outputs: {}
+    steps:
+      - name: Deploy with ArgoCD
+        uses: docker://golang:1.20.3-alpine3.17
+        shell: sh
+        run: echo "hello world"
+        kind: deploy
+  DAST:
+    needs:
+      - ArgoCD
+    environment: ""
+    outputs: {}
+    steps:
+      - name: Zap-scan environments
+        uses: cloudbees-io/zap-dast-scan-environment@v1
+        with:
+          zap-url: test.com
+          token: "1234"
+          environment: test
+          url: test.com
+          paths: /
+          context-available: //
+          auth-type: none
+        kind: scan
+  ArgoCD_Deploy:
+    needs:
+      - ManualApproval
+    environment: ""
+    outputs: {}
+    steps:
+      - name: Deploy to prod
+        uses: cloudbees-io/argocd-run-workflow@v2
+        with:
+          url: test
+          token: test
+          namespace: test
+          workflow-name: test run
+        kind: deploy
+  Manual_approval:
+    needs:
+      - Code_quality
+      - SAST
+    timeout-minutes: 4320
+    with:
+      instructions: ""
+      disallowLaunchByUser: true
+      approvers: ""
+      notifyAllEligibleUsers: false
+    delegates: cloudbees-io/manual-approval/custom-job.yml@v1
+  ManualApproval:
+    needs:
+      - DAST
+    timeout-minutes: 4320
+    with:
+      instructions: ""
+      disallowLaunchByUser: true
+      approvers: ""
+      notifyAllEligibleUsers: true
+    delegates: cloudbees-io/manual-approval/custom-job.yml@v1
