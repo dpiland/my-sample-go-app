@@ -1,0 +1,171 @@
+apiVersion: automation.cloudbees.io/v1alpha1
+kind: workflow
+name: Staged Workflow-June2025
+on:
+  workflow_dispatch: null
+metadata:
+  stages/v1alpha1:
+    - name: Release Readiness
+      jobs:
+        - Gather_Evidence
+        - Quality_Checks
+        - Confirm
+    - name: QA
+      jobs:
+        - Deploy_to_QA
+        - Enable_Flags
+        - Run-Functional_Test
+    - name: Pre-Prod
+      jobs:
+        - Deploy_to_PreProd
+        - Enable_flags
+        - Run_SIT_Tests
+        - Validation
+        - Create_SNOW_ticket
+    - name: Prod
+      jobs:
+        - Deploy2Prod
+        - Smoke_Tests
+        - Enable_AB_Test
+        - Determine_AB_Winner
+        - Set_FF_Value
+jobs:
+  Gather_Evidence:
+    steps:
+      - run: echo "Deploying to Prod"
+        uses: docker://golang:1.20.3-alpine3.17
+        name: Get Jira tickets
+        shell: sh
+      - uses: cloudbees-io/configure-git-global-credentials@v1
+        name: Get Frontend changelogs
+      - uses: cloudbees-io/configure-git-global-credentials@v1
+        name: Get backend changelogs
+  Quality_Checks:
+    needs: Gather_Evidence
+    steps:
+      - with:
+          language: test
+        uses: cloudbees-io/sonarqube-bundled-sast-scan-code@v2
+        name: Run code quality and security scan
+  Deploy_to_QA:
+    needs: Confirm
+    steps:
+      - name: ArgoCD
+        uses: cloudbees-io/argocd-run-workflow@v2
+        with:
+          url: test
+          token: test
+          namespace: test
+          workflow-name: test
+        kind: deploy
+  Enable_Flags:
+    needs: Deploy_to_QA
+    steps:
+      - with:
+          s3-path: d
+          file-path: d
+          bucket-name: d
+        uses: cloudbees-io/s3-upload-object@v1
+        name: FM
+  Run-Functional_Test:
+    needs: Enable_Flags
+    steps:
+      - with:
+          test-type: h
+        uses: cloudbees-io/publish-test-results@v2
+        name: JUnit
+  Confirm:
+    needs: Quality_Checks
+    timeout-minutes: 4320
+    with:
+      instructions: need you to approve
+      disallowLaunchByUser: false
+      approvers: 44eaa402-a3c5-11ec-918b-42010a83ae13
+      notifyAllEligibleUsers: false
+    delegates: cloudbees-io/manual-approval/custom-job.yml@v1
+  Deploy_to_PreProd:
+    needs: Run-Functional_Test
+    steps:
+      - run: echo "hello world"
+        uses: docker://golang:1.20.3-alpine3.17
+        name: Deploy
+        shell: sh
+  Enable_flags:
+    needs: Deploy_to_PreProd
+    steps:
+      - with:
+          test-type: d
+        uses: cloudbees-io/publish-test-results@v2
+        name: Setup flag
+  Run_SIT_Tests:
+    needs: Enable_flags
+    steps:
+      - name: Selinium
+        kind: test
+        uses: cloudbees-io/s3-upload-object@v1
+        with:
+          bucket-name: e
+          file-path: e
+          s3-path: e
+  Validation:
+    needs: Run_SIT_Tests
+    timeout-minutes: 4320
+    with:
+      instructions: need manual validation
+      disallowLaunchByUser: false
+      approvers: 44eaa402-a3c5-11ec-918b-42010a83ae13
+      notifyAllEligibleUsers: false
+    delegates: cloudbees-io/manual-approval/custom-job.yml@v1
+  Create_SNOW_ticket:
+    needs: Validation
+    steps:
+      - with:
+          action-type: d
+          url: d
+          username: d
+          password: d
+        uses: cloudbees-io/servicenow@v1
+        name: ServiceNow
+  Deploy2Prod:
+    needs: Create_SNOW_ticket
+    steps:
+      - run: echo "hello world"
+        uses: docker://golang:1.20.3-alpine3.17
+        name: Deployer
+        shell: sh
+  Smoke_Tests:
+    needs: Deploy2Prod
+    steps:
+      - name: Selinium
+        kind: test
+        uses: cloudbees-io/trufflehog-secret-scan-code@v1
+        with:
+          branch: a
+  Enable_AB_Test:
+    needs: Smoke_Tests
+    steps:
+      - name: FM prod
+        kind: deploy
+        uses: cloudbees-io/s3-upload-object@v1
+        with:
+          bucket-name: f
+          file-path: f
+          s3-path: f
+  Determine_AB_Winner:
+    needs: Enable_AB_Test
+    steps:
+      - with:
+          function-name: d
+        uses: pre-configured-labmda-invoke-function
+        name: Select winner
+  Set_FF_Value:
+    needs:
+      - Determine_AB_Winner
+    steps:
+      - name: Turn flag on
+        kind: deploy
+        uses: cloudbees-io/s3-upload-object@v1
+        with:
+          bucket-name: d
+          file-path: d
+          s3-path: d
